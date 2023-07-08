@@ -47,47 +47,27 @@ class ConvAEIn(nn.Module):
 from torchvision import models
 print("testing Resnet...")
 class ResNet18(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=1, hidden=50):
         super().__init__()
         self.resnet = models.resnet18(weights=None)
-        self.resnet.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.resnet.conv1 = nn.Conv2d(in_channels, 10, kernel_size=3, stride=2, padding=1, bias=False)
         self.relu = nn.LeakyReLU()
-        # self.resnet.fc = nn.Linear(512, out_nodes)  # Flatten to 128 nodes
+
         # Replace residual blocks in layers 2, 3, and 4 with identity blocks
-        self.resnet.layer2 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(64),
+        self.resnet.layer1 = nn.Sequential(
+            nn.Conv2d(10, 20, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(20),
             nn.LeakyReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(64)
+            nn.Conv2d(20, 50, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(50)
         )
-        self.resnet.layer3 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(),
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(128)
-        )
-        self.resnet.layer4 = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(),
-            nn.Conv2d(256, 64, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(64))
 
     def forward(self, x):
         x = self.resnet.conv1(x)
-        x = self.resnet.bn1(x)
-        x = self.resnet.relu(x)
-        #x = self.resnet.maxpool(x)
-
-        x = self.resnet.layer1(x)
-        x = self.resnet.layer2(x)
-        x = self.resnet.layer3(x)
-        x = self.resnet.layer4(x)
-
+        x = self.relu(x)
+        x = self.resnet.layer1(x) # Add the residual connection
         return x
-    
+
 
 
 class ConvAE(nn.Module):
@@ -328,10 +308,10 @@ if __name__ == "__main__":
     ae_params = {"kernelSize": [3],
         "numHidden":  [50],
         "input_size": [32, 32],
-        "numSubj": 100,
+        "numSubj": 8,
         "cte": 1.0e-4,
         "rankE": 10,
-        "numPerSubj": 72
+        "numPerSubj": 8
         } # pre-trained model
     
     class ConvAE(nn.Module):
@@ -343,10 +323,12 @@ if __name__ == "__main__":
             numSubj = params["numSubj"]
             rankEs = params["rankE"]
 
-            self.batchSize = 64
+            self.batchSize = numSubj * params["numPerSubj"]
+
             print("batchSize:", self.batchSize)
             self.padEncL1 = nn.ZeroPad2d((0, 2, 0, 2))
             self.encL1 = nn.Conv2d(1, numHidden[0], kernel_size=kernelSize[0], stride=2)
+            self.resnet18 = ResNet18(in_channels=1)
 
             cc = np.zeros((self.batchSize, rankEs))
 
@@ -356,7 +338,7 @@ if __name__ == "__main__":
             self.decL1 = nn.ConvTranspose2d(numHidden[0], 1, kernel_size=kernelSize[0], stride=2)
 
         def forward(self, X):
-            Z1 = F.relu(self.encL1(self.padEncL1(X)))
+            Z1 = F.relu(self.resnet18(X))
             print("Z1 shape:", Z1.shape)
             Y = (torch.matmul(self.C1, torch.transpose(self.C1, 0, 1))-torch.diag(torch.diag(torch.matmul(self.C1, torch.transpose(self.C1, 0, 1))))).mm(Z1.view(self.batchSize, -1))
             Y = Y.view(Z1.size())
@@ -443,37 +425,3 @@ if __name__ == "__main__":
     #                                         col_names=["input_size","kernel_size", "output_size", "num_params"], col_width=20,
     #          row_settings=["var_names"],depth=5)
     # print(summary)
-    
-    args = yaml.load(open("/kaggle/working/DLRSC/COIL100_config.yaml", 'r'))
-    params = {}
-    params["numSubj"] = args["dataset"]["numSubj"]
-    params["numPerSubj"] = args["dataset"]["numPerSubj"]
-    params["lr"] = args["training"]["lr"]
-    params["T"] = 1
-    params["numEpochs"] = 10
-    params["lambda"] = args["training"]["lambda"]
-    params["gamma"] = args["training"]["gamma"]
-    params["cte"] = args["training"]["cte"]
-    params["seedFlag"] = args["training"]["seedFlag"]
-    params["seedValue"] = args["training"]["seedValue"]
-    params["post_proc"] = args["training"]["post_proc"]
-    params["dataPath"] = "/kaggle/working/DLRSC/Data/COIL100.mat"
-    params["preTrainedModel"] = "/kaggle/working/DLRSC/PreTrained-COIL100.pt"
-    params["kernelSize"] = args["model"]["kernelSize"]
-    params["numHidden"] = args["model"]["numHidden"]
-    params["input_size"] = args["model"]["input_size"]
-    params["rankE"] = args["training"]["rankE"] * params["numSubj"]
-    params["indx"] = 0
-    params["alpha"] = 0.04
-    params["regparams"] = 1.0
-    data = sio.loadmat(params["dataPath"])
-
-    images = data['fea']
-    images = np.reshape(images, [images.shape[0], 1, params["input_size"][0], params["input_size"][1]])
-    params["label"]  = data['gnd']
-
-
-    errorMean = subspaceClusteringMLRDSC(images, params)
-    print("====================================================")
-    print('%d subjects:' % (params["numSubj"]), "Params: %d" %(params["indx"]))
-    print('Mean: %.4f%%' % (errorMean * 100))
