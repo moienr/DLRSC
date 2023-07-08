@@ -259,7 +259,7 @@ def err_rate(gt_s, s):
 # ===========================================================================================
 if __name__ == "__main__":
 
-    args = yaml.load(open("EYaleB_config.yaml", 'r'))
+    args = yaml.load(open("EYaleB_config.yaml", 'r'), Loader=yaml.FullLoader)
     params = {}
     params["numSubj"]    = args["dataset"]["numSubj"]
     params["numPerSubj"] = args["dataset"]["numPerSubj"]
